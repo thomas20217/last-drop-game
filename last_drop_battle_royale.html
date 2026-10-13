@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Last Drop — Battle Royale</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#101820;color:#f3f6f8;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+canvas{display:block;width:100vw;height:100vh;background:#233b32;touch-action:none}
+#hud{position:fixed;inset:0;pointer-events:none;text-shadow:0 2px 3px #000}
+.panel{background:#101820d9;border:1px solid #ffffff30;border-radius:12px;padding:10px 13px;backdrop-filter:blur(4px)}
+#top{position:absolute;top:10px;left:10px;display:flex;gap:8px;flex-wrap:wrap;max-width:calc(100% - 20px)}
+#status{position:absolute;top:10px;right:10px;text-align:right;min-width:130px}
+#bottom{position:absolute;bottom:12px;left:12px;display:flex;gap:8px;align-items:end}
+#help{position:absolute;bottom:12px;right:12px;max-width:350px;font-size:12px;line-height:1.4}
+#overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#081017d9;padding:18px;z-index:5}
+.card{width:min(570px,100%);max-height:95vh;overflow:auto;background:#182630;border:1px solid #ffffff35;border-radius:18px;padding:24px;box-shadow:0 20px 70px #0009}
+h1{font-size:clamp(30px,6vw,48px);margin:0 0 4px;letter-spacing:-1.5px}p{color:#c9d5db;line-height:1.5}
+button,select{font:inherit;border:1px solid #ffffff30;border-radius:10px;padding:11px 14px;background:#263b49;color:white}
+button{cursor:pointer;font-weight:750;background:#e6b84e;color:#18212a;border:0}button.secondary{background:#304755;color:white;border:1px solid #ffffff25}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.row>*{flex:1}.small{font-size:12px;color:#aebfc8}
+#mobile{display:none;position:fixed;inset:auto 0 12px;justify-content:space-between;padding:0 14px;pointer-events:none;z-index:3}
+.stick{width:118px;height:118px;border-radius:50%;background:#ffffff18;border:2px solid #ffffff44;position:relative;pointer-events:auto;touch-action:none}
+.knob{width:42px;height:42px;position:absolute;left:36px;top:36px;border-radius:50%;background:#ffffff8a;border:2px solid #fff}
+.mobileActions{display:flex;gap:9px;align-items:end;pointer-events:auto}
+.mobileActions button{width:58px;height:58px;border-radius:50%;padding:0;background:#e6b84e}
+@media(max-width:750px){#help{display:none}#mobile{display:flex}#bottom{bottom:142px}#status{top:auto;bottom:142px}#top{max-width:70%}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+ <div id="top"><div class="panel">🪂 <b>LAST DROP</b> <span class="small">BATTLE ROYALE</span></div><div class="panel" id="players">Players: 33</div><div class="panel" id="zone">Zone closing in: 25</div></div>
+ <div id="status" class="panel">❤️ <b id="hp">100</b><br>🛡️ <b id="shield">50</b><br>🔫 <b id="ammo">30 / ∞</b></div>
+ <div id="bottom"><div class="panel">🏆 Alive: <b id="alive">33</b><br>🎯 Kills: <b id="kills">0</b><br><span id="weapon">Assault rifle</span></div></div>
+ <div id="help" class="panel"><b>Controls</b><br>Move: WASD / arrow keys · Aim: mouse · Fire: click / Space<br>Reload: R · Switch weapon: Q · Sprint: Shift<br>Two players: P2 uses arrows to move, IJKL to aim, Enter to fire.</div>
+</div>
+<div id="mobile"><div class="stick" id="moveStick"><div class="knob"></div></div><div class="mobileActions"><button id="fireTouch">FIRE</button><button id="reloadTouch" class="secondary">↻</button></div></div>
+<div id="overlay"><div class="card">
+<h1>LAST DROP</h1><div style="color:#e6b84e;font-weight:800;letter-spacing:2px">BATTLE ROYALE</div>
+<p>Drop into a shrinking arena, scavenge supplies, and outplay <b>32 skill-based bots</b>. Bots use cover, aim, flank, retreat, loot, and fight each other. Be the last one standing.</p>
+<div class="row"><label>Players<br><select id="mode"><option value="1">1 player + 32 bots</option><option value="2">2 local players + 32 bots</option></select></label><label>Difficulty<br><select id="difficulty"><option value="normal">Balanced</option><option value="hard">Hard</option><option value="easy">Chill</option></select></label></div>
+<div class="row"><button id="start">DEPLOY</button><button class="secondary" id="how">HOW TO PLAY</button></div>
+<div id="howText" class="small" style="display:none">Desktop: Player 1 moves with WASD, aims with mouse and fires with click. Player 2 moves with arrow keys, aims with I/J/K/L and fires Enter. On touchscreens, drag the left stick to move and hold FIRE to shoot; use the player count selector for two players. Pick up glowing loot by walking over it. Stay inside the safe circle!</div>
+<p class="small">A compact top-down arena game designed to run in your browser. Save this HTML file and open it to play offline.</p>
+</div></div>
+<script>
+(()=> {
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+let W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
+function resize(){W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}addEventListener('resize',resize);resize();
+const WORLD=2200, rand=(a,b)=>a+Math.random()*(b-a), clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y), angle=(a,b)=>Math.atan2(b.y-a.y,b.x-a.x);
+let players=[],bots=[],bullets=[],loot=[],obstacles=[],keys={},mouse={x:W/2,y:H/2,down:false},gameOn=false,ended=false,tick=0,kills=0,zone={x:WORLD/2,y:WORLD/2,r:1040,start:1040,wait:150},mode=1,difficulty='normal',camera={x:WORLD/2,y:WORLD/2},last=0;
+const names=['Rook','Viper','Mako','Nova','Ghost','Ranger','Echo','Flint','Sable','Hawk','Cobra','Jinx','Atlas','Frost','Blitz','Kestrel','Reaper','Warden','Scout','Rivet','Onyx','Dash','Bishop','Raptor','Mantis','Bolt','Crow','Stryker','Talon','Drift','Raven','Knox'];
+function makeFighter(x,y,isPlayer=false,pid=1,name=''){return {x,y,r:13,hp:100,shield:50,angle:0,speed:isPlayer?205:rand(115,155),isPlayer,pid,name:name||'Bot',alive:true,ammo:30,mag:30,reload:0,fireCD:0,kills:0,weapon:'Assault rifle',target:null,think:0,strafe:Math.random()<.5?-1:1,skill:rand(.55,.95),color:isPlayer?(pid===1?'#63e6ff':'#ff82d0'):['#ff8f66','#b4a4ff','#9be36b','#f7cf63','#e98aff'][Math.floor(Math.random()*5)],lastHit:0,moveX:0,moveY:0,aimX:0,aimY:0};}
+function reset(){players=[];bots=[];bullets=[];loot=[];obstacles=[];kills=0;tick=0;zone={x:WORLD/2,y:WORLD/2,r:1040,start:1040,wait:150};ended=false;
+ // Buildings, rocks and trees as cover; keep a clear spawn center
+ for(let i=0;i<95;i++){let x=rand(80,WORLD-80),y=rand(80,WORLD-80),r=rand(18,42);if(Math.hypot(x-WORLD/2,y-WORLD/2)<100)continue;obstacles.push({x,y,r,type:Math.random()<.55?'tree':'rock',hp:100});}
+ for(let i=0;i<70;i++){let x=rand(60,WORLD-60),y=rand(60,WORLD-60);loot.push({x,y,type:Math.random()<.62?'ammo':Math.random()<.65?'shield':'med',taken:false});}
+ players.push(makeFighter(WORLD/2-35,WORLD/2,true,1,'Player 1'));
+ if(mode===2)players.push(makeFighter(WORLD/2+35,WORLD/2,true,2,'Player 2'));
+ for(let i=0;i<32;i++){let a=rand(0,Math.PI*2),r=rand(300,850);bots.push(makeFighter(clamp(WORLD/2+Math.cos(a)*r,40,WORLD-40),clamp(WORLD/2+Math.sin(a)*r,40,WORLD-40),false,0,names[i]));}
+ gameOn=true;document.getElementById('overlay').style.display='none';}
+function all(){return [...players,...bots].filter(f=>f.alive)}
+function circleRectHit(x,y,r,o){let dx=x-o.x,dy=y-o.y,d=Math.hypot(dx,dy);return d<r+o.r}
+function blocked(x,y,r){return obstacles.some(o=>circleRectHit(x,y,r,o))}
+function move(f,dx,dy,dt){let m=Math.hypot(dx,dy);if(m>1){dx/=m;dy/=m}let nx=clamp(f.x+dx*f.speed*dt,20,WORLD-20),ny=clamp(f.y+dy*f.speed*dt,20,WORLD-20);
+ if(!blocked(nx,f.y,f.r))f.x=nx;if(!blocked(f.x,ny,f.r))f.y=ny;}
+function takeDamage(f,damage,attacker){if(!f.alive)return;let s=Math.min(f.shield,damage);f.shield-=s;damage-=s;f.hp-=damage;f.lastHit=tick;if(f.hp<=0){f.hp=0;f.alive=false;if(attacker){attacker.kills++;if(attacker.isPlayer)kills++;}loot.push({x:f.x,y:f.y,type:'med',taken:false});if(f.isPlayer){if(!all().some(p=>p.isPlayer))finish(false)}else if(all().filter(p=>!p.isPlayer).length===0&&players.some(p=>p.alive))finish(true);}}
+function shoot(f,ang){if(!f.alive||f.fireCD>0||f.reload>0)return;if(f.mag<=0){f.reload=1.25;return}f.mag--;f.fireCD=f.isPlayer?.16:(.38-(f.skill*.13));let spread=f.isPlayer?.035:(.24*(1-f.skill));ang+=rand(-spread,spread);let speed=690;bullets.push({x:f.x+Math.cos(ang)*17,y:f.y+Math.sin(ang)*17,vx:Math.cos(ang)*speed,vy:Math.sin(ang)*speed,owner:f,life:1.25,damage:f.isPlayer?22:rand(9,17),color:f.color});}
+function closestEnemy(f){let candidates=all().filter(e=>e!==f&&!(f.isPlayer&&e.isPlayer)&&!( !f.isPlayer&&!e.isPlayer?false:false)); // bots can fight anyone, players avoid friendly fire
+ if(!f.isPlayer)candidates=all().filter(e=>e!==f);
+ let best=null,bd=Infinity;for(let e of candidates){let d=dist(f,e);if(d<bd){best=e;bd=d}}return best}
+function updateBot(f,dt){if(!f.alive)return;f.fireCD=Math.max(0,f.fireCD-dt);f.reload=Math.max(0,f.reload-dt);f.think-=dt;
+ if(f.mag===0&&f.reload<=0)f.reload=1.25;
+ if(f.think<=0||!f.target||!f.target.alive){f.target=closestEnemy(f);f.think=rand(.18,.45)}
+ let t=f.target;if(!t)return;let d=dist(f,t),a=angle(f,t);f.angle=a;
+ let zoneD=Math.hypot(f.x-zone.x,f.y-zone.y),dx=0,dy=0;
+ // Tactical movement: keep combat range, strafe, seek cover, retreat when hurt, rotate toward zone
+ if(zoneD>zone.r-70){dx+=(zone.x-f.x)/(zoneD||1)*1.3;dy+=(zone.y-f.y)/(zoneD||1)*1.3}
+ if(d>300){dx+=Math.cos(a);dy+=Math.sin(a)}else if(d<155){dx-=Math.cos(a)*.8;dy-=Math.sin(a)*.8}
+ dx+=Math.cos(a+Math.PI/2)*f.strafe*.7;dy+=Math.sin(a+Math.PI/2)*f.strafe*.7;
+ if(f.hp<42){dx-=Math.cos(a)*.65;dy-=Math.sin(a)*.65}
+ // Look for a nearby piece of cover when taking fire
+ if(t.lastHit>tick-0.7&&f.hp<75){let best=null,bd=Infinity;for(let o of obstacles){let od=Math.hypot(o.x-f.x,o.y-f.y);if(od<180&&od<bd){bd=od;best=o}}if(best){dx+=(best.x-f.x)/(bd||1)*.9;dy+=(best.y-f.y)/(bd||1)*.9}}
+ move(f,dx,dy,dt*(difficulty==='hard'?1.12:difficulty==='easy'?.85:1));
+ if(d<520&&f.reload<=0){let skill=f.skill*(difficulty==='hard'?1.2:difficulty==='easy'?.75:1);shoot(f,a+rand(-.12,.12)*(1-skill))}
+ if(Math.random()<dt*.22)f.strafe*=-1;
+}
+function updatePlayer(f,dt){if(!f.alive)return;f.fireCD=Math.max(0,f.fireCD-dt);f.reload=Math.max(0,f.reload-dt);if(f.mag===0&&f.reload<=0)f.reload=1.15;
+ let dx=0,dy=0;
+ if(f.pid===1){dx=(keys.d?1:0)-(keys.a?1:0);dy=(keys.s?1:0)-(keys.w?1:0);}
+ else {dx=(keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0);dy=(keys.ArrowDown?1:0)-(keys.ArrowUp?1:0);}
+ let sprint=keys.Shift?1.35:1;f.speed=205*sprint;move(f,dx,dy,dt);
+ if(f.pid===1){let wx=mouse.x-W/2+camera.x,wy=mouse.y-H/2+camera.y;f.angle=Math.atan2(wy-f.y,wx-f.x);if(mouse.down||keys[' '])shoot(f,f.angle);}
+ else {let ax=(keys.l?1:0)-(keys.j?1:0),ay=(keys.k?1:0)-(keys.i?1:0);if(ax||ay)f.angle=Math.atan2(ay,ax);if(keys.Enter)shoot(f,f.angle);}
+ if(keys.r&&f.reload<=0&&f.mag<30){f.reload=1.05;f.mag=30}if(keys.q&&tick%15===0)f.weapon=f.weapon==='Assault rifle'?'Burst rifle':'Assault rifle';
+}
+function updateBullets(dt){for(let b of bullets){b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
+ if(b.x<0||b.y<0||b.x>WORLD||b.y>WORLD)b.life=0;
+ if(obstacles.some(o=>Math.hypot(o.x-b.x,o.y-b.y)<o.r)){b.life=0;continue}
+ if(b.owner.isPlayer){for(let f of bots){if(f.alive&&Math.hypot(f.x-b.x,f.y-b.y)<f.r+4){takeDamage(f,b.damage,b.owner);b.life=0;break}}}
+ else {for(let f of all()){if(f===b.owner)continue;if(!b.owner.isPlayer&& !f.isPlayer && f===b.owner)continue;if(b.owner.isPlayer&&f.isPlayer)continue;if(Math.hypot(f.x-b.x,f.y-b.y)<f.r+4){takeDamage(f,b.damage,b.owner);b.life=0;break}}}
+ }bullets=bullets.filter(b=>b.life>0)}
+function updateLoot(){for(let l of loot){if(l.taken)continue;for(let f of players){if(f.alive&&Math.hypot(f.x-l.x,f.y-l.y)<28){l.taken=true;if(l.type==='med')f.hp=Math.min(100,f.hp+30);else if(l.type==='shield')f.shield=Math.min(100,f.shield+30);else f.mag=Math.min(30,f.mag+12);}}}}
+function updateZone(dt){zone.wait-=dt;if(zone.wait<=0){zone.r=Math.max(110,zone.r-11*dt);for(let f of all()){let d=Math.hypot(f.x-zone.x,f.y-zone.y);if(d>zone.r)takeDamage(f,10*dt,null)}}}
+function finish(win){if(ended)return;ended=true;gameOn=false;document.getElementById('overlay').style.display='flex';document.querySelector('.card h1').textContent=win?'VICTORY ROYALE!':'ELIMINATED';document.querySelector('.card p').innerHTML=win?`You survived the drop with <b>${kills} eliminations</b>. Champion performance!`:`You got ${kills} eliminations. Drop back in and try a new strategy.`;document.getElementById('start').textContent='PLAY AGAIN';}
+function draw(){ctx.clearRect(0,0,W,H);let alive=all();let focus=players.find(p=>p.alive)||players[0];if(focus){camera.x+=(focus.x-camera.x)*.09;camera.y+=(focus.y-camera.y)*.09;}let ox=W/2-camera.x,oy=H/2-camera.y;
+ ctx.save();ctx.translate(ox,oy);
+ ctx.fillStyle='#294638';ctx.fillRect(0,0,WORLD,WORLD);
+ // ground grid
+ ctx.strokeStyle='#ffffff0a';ctx.lineWidth=1;for(let x=0;x<WORLD;x+=100){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,WORLD);ctx.stroke()}for(let y=0;y<WORLD;y+=100){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(WORLD,y);ctx.stroke()}
+ // paths / terrain patches
+ for(let i=0;i<18;i++){ctx.fillStyle=i%2?'#355440':'#304d3b';ctx.beginPath();ctx.ellipse((i*317)%WORLD,(i*191+120)%WORLD,110,70, i,0,Math.PI*2);ctx.fill()}
+ for(let l of loot){if(l.taken)continue;ctx.fillStyle=l.type==='med'?'#70e08a':l.type==='shield'?'#69c8ff':'#f5d36a';ctx.beginPath();ctx.arc(l.x,l.y,7,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff9';ctx.stroke()}
+ for(let o of obstacles){if(o.type==='tree'){ctx.fillStyle='#172c25';ctx.beginPath();ctx.arc(o.x+3,o.y+5,o.r+2,0,Math.PI*2);ctx.fill();ctx.fillStyle='#47774b';ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();ctx.fillStyle='#6a9b5a';ctx.beginPath();ctx.arc(o.x-6,o.y-6,o.r*.45,0,Math.PI*2);ctx.fill()}else{ctx.fillStyle='#26333a';ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();ctx.fillStyle='#52616a';ctx.beginPath();ctx.arc(o.x-5,o.y-6,o.r*.55,0,Math.PI*2);ctx.fill()}}
+ // storm boundary
+ ctx.beginPath();ctx.arc(zone.x,zone.y,zone.r,0,Math.PI*2);ctx.fillStyle='#2e78d51b';ctx.fill();ctx.strokeStyle='#69c8ff';ctx.lineWidth=5;ctx.stroke();
+ // projectiles
+ for(let b of bullets){ctx.fillStyle=b.color;ctx.beginPath();ctx.arc(b.x,b.y,4,0,Math.PI*2);ctx.fill()}
+ for(let f of all()){ctx.save();ctx.translate(f.x,f.y);ctx.rotate(f.angle);ctx.fillStyle='#101820';ctx.fillRect(-3,-5,24,10);ctx.restore();ctx.fillStyle=f.color;ctx.beginPath();ctx.arc(f.x,f.y,f.r,0,Math.PI*2);ctx.fill();ctx.strokeStyle=f.isPlayer?'#fff':'#17221d';ctx.lineWidth=f.isPlayer?3:1.5;ctx.stroke();if(f.isPlayer){ctx.fillStyle='#fff';ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.fillText(f.pid===1?'P1':'P2',f.x,f.y-22)}ctx.fillStyle='#111';ctx.fillRect(f.x-16,f.y-23,32,4);ctx.fillStyle='#69e078';ctx.fillRect(f.x-16,f.y-23,32*(f.hp/100),4)}
+ // edge
+ ctx.strokeStyle='#101820';ctx.lineWidth=35;ctx.strokeRect(0,0,WORLD,WORLD);ctx.restore();
+ // mini map
+ const mw=125,mh=125,mx=W-139,my=H-139;ctx.fillStyle='#0d171dcc';ctx.fillRect(mx,my,mw,mh);ctx.strokeStyle='#ffffff80';ctx.strokeRect(mx,my,mw,mh);ctx.fillStyle='#4c7654';ctx.fillRect(mx+4,my+4,mw-8,mh-8);ctx.strokeStyle='#69c8ff';ctx.beginPath();ctx.arc(mx+zone.x/WORLD*mw,my+zone.y/WORLD*mh,zone.r/WORLD*mw,0,Math.PI*2);ctx.stroke();for(let f of all()){ctx.fillStyle=f.isPlayer?f.color:'#f5a17b';ctx.fillRect(mx+f.x/WORLD*mw-2,my+f.y/WORLD*mh-2,4,4)}
+ document.getElementById('players').textContent='Bots: '+bots.filter(b=>b.alive).length+' / 32';document.getElementById('alive').textContent=all().length;document.getElementById('kills').textContent=kills;document.getElementById('zone').textContent='Zone: '+Math.max(0,Math.ceil(zone.wait))+'s';let p=players.find(p=>p.alive)||players[0];if(p){document.getElementById('hp').textContent=Math.ceil(p.hp);document.getElementById('shield').textContent=Math.ceil(p.shield);document.getElementById('ammo').textContent=p.mag+' / ∞';document.getElementById('weapon').textContent=p.weapon}
+}
+function loop(ts){let dt=Math.min(.033,(ts-last)/1000||0);last=ts;if(gameOn){tick+=dt;for(let p of players)updatePlayer(p,dt);for(let b of bots)updateBot(b,dt);updateBullets(dt);updateLoot();updateZone(dt);if(all().filter(f=>!f.isPlayer).length===0&&players.some(p=>p.alive))finish(true);if(!all().some(p=>p.isPlayer)&&!ended)finish(false)}draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
+addEventListener('keydown',e=>{keys[e.key]=true;keys[e.key.toLowerCase()]=true;if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault()});addEventListener('keyup',e=>{keys[e.key]=false;keys[e.key.toLowerCase()]=false});
+canvas.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY});canvas.addEventListener('mousedown',()=>mouse.down=true);addEventListener('mouseup',()=>mouse.down=false);canvas.addEventListener('contextmenu',e=>e.preventDefault());
+document.getElementById('start').onclick=()=>{mode=+document.getElementById('mode').value;difficulty=document.getElementById('difficulty').value;document.querySelector('.card h1').textContent='LAST DROP';document.querySelector('.card p').innerHTML='Drop into a shrinking arena, scavenge supplies, and outplay <b>32 skill-based bots</b>. Bots use cover, aim, flank, retreat, loot, and fight each other. Be the last one standing.';reset()};
+document.getElementById('how').onclick=()=>{let e=document.getElementById('howText');e.style.display=e.style.display==='none'?'block':'none'};
+const stick=document.getElementById('moveStick'),knob=stick.querySelector('.knob');let touchOrigin=null;
+stick.addEventListener('pointerdown',e=>{stick.setPointerCapture(e.pointerId);touchOrigin={x:e.clientX,y:e.clientY};stickMove(e)});
+stick.addEventListener('pointermove',e=>{if(touchOrigin)stickMove(e)});stick.addEventListener('pointerup',()=>{touchOrigin=null;knob.style.left='36px';knob.style.top='36px';keys.w=keys.a=keys.s=keys.d=false});stick.addEventListener('pointercancel',()=>{touchOrigin=null});
+function stickMove(e){let r=stick.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,dx=e.clientX-cx,dy=e.clientY-cy,m=Math.hypot(dx,dy),lim=36;if(m>lim){dx*=lim/m;dy*=lim/m}knob.style.left=(36+dx)+'px';knob.style.top=(36+dy)+'px';keys.d=dx>10;keys.a=dx< -10;keys.s=dy>10;keys.w=dy< -10;}
+const fire=document.getElementById('fireTouch');fire.addEventListener('pointerdown',e=>{e.preventDefault();mouse.down=true;keys.Enter=true});fire.addEventListener('pointerup',()=>{mouse.down=false;keys.Enter=false});fire.addEventListener('pointercancel',()=>{mouse.down=false;keys.Enter=false});document.getElementById('reloadTouch').onclick=()=>{let p=players[0];if(p){p.mag=30;p.reload=1}}
+})();
+</script>
+</body></html>
